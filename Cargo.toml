@@ -1,0 +1,21 @@
+[package]
+name = "mdview"
+version = "0.1.0"
+edition = "2024"
+description = "A markdown viewer with PlantUML, Mermaid, and SVG support"
+
+[dependencies]
+pulldown-cmark = "0.12"
+clap = { version = "4", features = ["derive"] }
+wry = "0.47"
+tao = "0.30"
+notify = "7"
+base64 = "0.22"
+flate2 = "1"
+http = "1.4.0"
+muda = "0.17.1"
+image = { version = "0.25.9", default-features = false, features = ["png"] }
+objc2-app-kit = { version = "0.3", features = ["NSApplication", "NSImage", "NSRunningApplication"] }
+objc2-foundation = { version = "0.3", features = ["NSData"] }
+objc2 = "0.6"
+rfd = "0.17.2"

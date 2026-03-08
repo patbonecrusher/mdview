@@ -1,0 +1,463 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MdViewer — Native Markdown Viewer with Diagram Support</title>
+    <meta name="description" content="A fast, native markdown viewer for macOS, Windows, and Linux. Built with Rust. Supports Mermaid, PlantUML, SVG, and live reload.">
+    <link rel="icon" type="image/png" href="icon.png">
+    <style>
+        :root {
+            --orange-dark: #7a3a1a;
+            --orange: #e86a30;
+            --orange-light: #ff8844;
+            --orange-glow: #ff9d5c;
+            --bg: #08131c;
+            --surface: #0f1f2e;
+            --surface-2: #162a3a;
+            --text: #e6edf3;
+            --text-muted: #8b949e;
+            --accent: #e86a30;
+            --accent-hover: #ff8844;
+            --radius: 16px;
+        }
+
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            line-height: 1.6;
+            overflow-x: hidden;
+        }
+
+        /* --- Hero --- */
+        .hero {
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            text-align: center;
+            padding: 2rem;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .hero::before {
+            content: '';
+            position: absolute;
+            top: -40%;
+            left: 50%;
+            transform: translateX(-50%);
+            width: 800px;
+            height: 800px;
+            background: radial-gradient(circle, rgba(232,106,48,0.12) 0%, transparent 70%);
+            pointer-events: none;
+        }
+
+        .hero-icon {
+            width: 200px;
+            height: 200px;
+            border-radius: 44px;
+            margin-bottom: 2rem;
+            box-shadow: 0 0 60px rgba(232,106,48,0.3);
+        }
+
+        .hero h1 {
+            font-size: clamp(2.5rem, 6vw, 4.5rem);
+            font-weight: 800;
+            letter-spacing: -0.03em;
+            margin-bottom: 1rem;
+            background: linear-gradient(135deg, var(--text) 0%, var(--orange-glow) 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+
+        .hero p {
+            font-size: clamp(1.1rem, 2.5vw, 1.4rem);
+            color: var(--text-muted);
+            max-width: 600px;
+            margin-bottom: 2.5rem;
+        }
+
+        .cta-group {
+            display: flex;
+            gap: 1rem;
+            flex-wrap: wrap;
+            justify-content: center;
+        }
+
+        .btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.5rem;
+            padding: 0.9rem 2rem;
+            border-radius: 12px;
+            font-size: 1rem;
+            font-weight: 600;
+            text-decoration: none;
+            transition: all 0.2s ease;
+            cursor: pointer;
+            border: none;
+        }
+
+        .btn-primary {
+            background: var(--accent);
+            color: #fff;
+        }
+        .btn-primary:hover {
+            background: var(--accent-hover);
+            box-shadow: 0 0 30px rgba(232,106,48,0.4);
+            transform: translateY(-2px);
+        }
+
+        .btn-secondary {
+            background: var(--surface);
+            color: var(--text);
+            border: 1px solid rgba(255,255,255,0.1);
+        }
+        .btn-secondary:hover {
+            background: var(--surface-2);
+            border-color: var(--accent);
+            transform: translateY(-2px);
+        }
+
+        .platforms {
+            margin-top: 2rem;
+            color: var(--text-muted);
+            font-size: 0.9rem;
+        }
+
+        /* --- Screenshot placeholder --- */
+        .screenshot-section {
+            padding: 0 2rem 6rem;
+            display: flex;
+            justify-content: center;
+        }
+
+        .screenshot-frame {
+            width: 100%;
+            max-width: 1000px;
+            aspect-ratio: 16/10;
+            background: var(--surface);
+            border: 1px solid rgba(255,255,255,0.08);
+            border-radius: var(--radius);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .screenshot-frame::before {
+            content: '';
+            position: absolute;
+            inset: 0;
+            background:
+                radial-gradient(circle at 30% 40%, rgba(232,106,48,0.08) 0%, transparent 50%),
+                radial-gradient(circle at 70% 60%, rgba(232,106,48,0.05) 0%, transparent 50%);
+        }
+
+        .screenshot-placeholder {
+            color: var(--text-muted);
+            font-size: 1.1rem;
+            z-index: 1;
+        }
+
+        /* --- Features --- */
+        .features {
+            padding: 6rem 2rem;
+            max-width: 1100px;
+            margin: 0 auto;
+        }
+
+        .features h2 {
+            text-align: center;
+            font-size: 2.2rem;
+            font-weight: 700;
+            margin-bottom: 3rem;
+        }
+
+        .features-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 1.5rem;
+        }
+
+        .feature-card {
+            background: var(--surface);
+            border: 1px solid rgba(255,255,255,0.06);
+            border-radius: var(--radius);
+            padding: 2rem;
+            transition: border-color 0.2s;
+        }
+        .feature-card:hover {
+            border-color: rgba(232,106,48,0.3);
+        }
+
+        .feature-icon {
+            font-size: 1.8rem;
+            margin-bottom: 1rem;
+        }
+
+        .feature-card h3 {
+            font-size: 1.2rem;
+            font-weight: 600;
+            margin-bottom: 0.5rem;
+        }
+
+        .feature-card p {
+            color: var(--text-muted);
+            font-size: 0.95rem;
+        }
+
+        /* --- Tech --- */
+        .tech {
+            padding: 4rem 2rem 6rem;
+            max-width: 800px;
+            margin: 0 auto;
+            text-align: center;
+        }
+
+        .tech h2 {
+            font-size: 2.2rem;
+            font-weight: 700;
+            margin-bottom: 1rem;
+        }
+
+        .tech p {
+            color: var(--text-muted);
+            margin-bottom: 2rem;
+            font-size: 1.05rem;
+        }
+
+        .tech-badges {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.75rem;
+            justify-content: center;
+        }
+
+        .badge {
+            background: var(--surface);
+            border: 1px solid rgba(255,255,255,0.08);
+            border-radius: 8px;
+            padding: 0.5rem 1rem;
+            font-size: 0.9rem;
+            color: var(--text-muted);
+            font-weight: 500;
+        }
+
+        /* --- Download --- */
+        .download {
+            padding: 6rem 2rem;
+            text-align: center;
+            background: var(--surface);
+            border-top: 1px solid rgba(255,255,255,0.06);
+        }
+
+        .download h2 {
+            font-size: 2.2rem;
+            font-weight: 700;
+            margin-bottom: 1rem;
+        }
+
+        .download p {
+            color: var(--text-muted);
+            margin-bottom: 2.5rem;
+            font-size: 1.05rem;
+        }
+
+        .download-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 1rem;
+            max-width: 900px;
+            margin: 0 auto;
+        }
+
+        .download-card {
+            background: var(--bg);
+            border: 1px solid rgba(255,255,255,0.08);
+            border-radius: var(--radius);
+            padding: 1.5rem;
+            text-decoration: none;
+            color: var(--text);
+            transition: all 0.2s;
+        }
+        .download-card:hover {
+            border-color: var(--accent);
+            transform: translateY(-3px);
+            box-shadow: 0 8px 30px rgba(0,0,0,0.3);
+        }
+
+        .download-card .os-icon {
+            font-size: 2rem;
+            margin-bottom: 0.75rem;
+        }
+
+        .download-card h3 {
+            font-size: 1rem;
+            font-weight: 600;
+            margin-bottom: 0.25rem;
+        }
+
+        .download-card .arch {
+            font-size: 0.8rem;
+            color: var(--text-muted);
+        }
+
+        /* --- Footer --- */
+        footer {
+            padding: 3rem 2rem;
+            text-align: center;
+            color: var(--text-muted);
+            font-size: 0.85rem;
+        }
+
+        footer a {
+            color: var(--accent);
+            text-decoration: none;
+        }
+        footer a:hover {
+            text-decoration: underline;
+        }
+
+        /* --- Responsive --- */
+        @media (max-width: 600px) {
+            .features-grid { grid-template-columns: 1fr; }
+            .download-grid { grid-template-columns: 1fr 1fr; }
+        }
+    </style>
+</head>
+<body>
+
+<!-- Hero -->
+<section class="hero">
+    <img src="icon.png" alt="MdViewer icon" class="hero-icon">
+    <h1>MdViewer</h1>
+    <p>A native markdown viewer with diagram support. Live reload, multiple themes, and beautiful rendering. Built with Rust.</p>
+    <div class="cta-group">
+        <a href="#download" class="btn btn-primary">
+            <svg width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+            Download
+        </a>
+        <a href="https://github.com/patbonecrusher/mdview" class="btn btn-secondary">
+            <svg width="20" height="20" fill="currentColor" viewBox="0 0 24 24"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/></svg>
+            Source Code
+        </a>
+    </div>
+    <p class="platforms">Available for macOS, Windows, and Linux</p>
+</section>
+
+<!-- Screenshot -->
+<section class="screenshot-section">
+    <div class="screenshot-frame">
+        <span class="screenshot-placeholder">
+            <!-- Replace with: <img src="screenshot.png" alt="MdViewer screenshot" style="width:100%;height:100%;object-fit:cover;border-radius:16px"> -->
+            Screenshot coming soon
+        </span>
+    </div>
+</section>
+
+<!-- Features -->
+<section class="features">
+    <h2>Why MdViewer?</h2>
+    <div class="features-grid">
+        <div class="feature-card">
+            <div class="feature-icon">&#128196;</div>
+            <h3>Full GFM Support</h3>
+            <p>Tables, task lists, footnotes, strikethrough, and all GitHub Flavored Markdown extensions rendered beautifully.</p>
+        </div>
+        <div class="feature-card">
+            <div class="feature-icon">&#128202;</div>
+            <h3>Diagram Rendering</h3>
+            <p>Mermaid and PlantUML diagrams render inline. Flowcharts, sequence diagrams, class diagrams, and more.</p>
+        </div>
+        <div class="feature-card">
+            <div class="feature-icon">&#127912;</div>
+            <h3>SVG Support</h3>
+            <p>Inline SVG code blocks and SVG file references render natively with theme-aware colors.</p>
+        </div>
+        <div class="feature-card">
+            <div class="feature-icon">&#9889;</div>
+            <h3>Live Reload</h3>
+            <p>Edit your markdown in any editor. MdViewer watches the file and refreshes instantly on save.</p>
+        </div>
+        <div class="feature-card">
+            <div class="feature-icon">&#127752;</div>
+            <h3>Themes &amp; Customization</h3>
+            <p>Auto, Light, Dark, Modest, and Modest Dark themes. Configurable fonts and sizes with live preview.</p>
+        </div>
+        <div class="feature-card">
+            <div class="feature-icon">&#128279;</div>
+            <h3>Document Navigation</h3>
+            <p>Click .md links to navigate between documents. Multi-window support for viewing several files at once.</p>
+        </div>
+    </div>
+</section>
+
+<!-- Tech -->
+<section class="tech">
+    <h2>Built with Modern Tech</h2>
+    <p>Native performance, no Electron.</p>
+    <div class="tech-badges">
+        <span class="badge">Rust</span>
+        <span class="badge">wry</span>
+        <span class="badge">tao</span>
+        <span class="badge">pulldown-cmark</span>
+        <span class="badge">highlight.js</span>
+        <span class="badge">mermaid.js</span>
+        <span class="badge">PlantUML</span>
+        <span class="badge">Native WebView</span>
+    </div>
+</section>
+
+<!-- Download -->
+<section class="download" id="download">
+    <h2>Download</h2>
+    <p>Grab the latest release for your platform.</p>
+    <div class="download-grid">
+        <a href="https://github.com/patbonecrusher/mdview/releases/latest/download/MdViewer-macos-arm64.tar.gz" class="download-card">
+            <div class="os-icon">&#63743;</div>
+            <h3>macOS</h3>
+            <span class="arch">Apple Silicon (ARM)</span>
+        </a>
+        <a href="https://github.com/patbonecrusher/mdview/releases/latest/download/MdViewer-windows-x64.zip" class="download-card">
+            <div class="os-icon">&#128187;</div>
+            <h3>Windows</h3>
+            <span class="arch">x86_64</span>
+        </a>
+        <a href="https://github.com/patbonecrusher/mdview/releases/latest/download/MdViewer-windows-arm64.zip" class="download-card">
+            <div class="os-icon">&#128187;</div>
+            <h3>Windows</h3>
+            <span class="arch">ARM64</span>
+        </a>
+        <a href="https://github.com/patbonecrusher/mdview/releases/latest/download/MdViewer-linux-x64.tar.gz" class="download-card">
+            <div class="os-icon">&#128039;</div>
+            <h3>Linux</h3>
+            <span class="arch">x86_64</span>
+        </a>
+        <a href="https://github.com/patbonecrusher/mdview/releases/latest/download/MdViewer-linux-arm64.tar.gz" class="download-card">
+            <div class="os-icon">&#128039;</div>
+            <h3>Linux</h3>
+            <span class="arch">ARM64</span>
+        </a>
+    </div>
+</section>
+
+<!-- Footer -->
+<footer>
+    <p>
+        MdViewer is open source &mdash;
+        <a href="https://github.com/patbonecrusher/mdview">GitHub</a>
+        &nbsp;&middot;&nbsp;
+        MIT License
+    </p>
+</footer>
+
+</body>
+</html>

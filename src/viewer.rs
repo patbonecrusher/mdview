@@ -1,11 +1,12 @@
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use muda::{AboutMetadata, Menu, MenuEvent, MenuItem, PredefinedMenuItem, Submenu};
 use notify::RecommendedWatcher;
 use tao::event::{Event, WindowEvent};
-use tao::event_loop::{ControlFlow, EventLoopBuilder};
-use tao::window::WindowBuilder;
-use wry::WebViewBuilder;
+use tao::event_loop::{ControlFlow, EventLoopBuilder, EventLoopProxy, EventLoopWindowTarget};
+use tao::window::{Window, WindowBuilder, WindowId};
+use wry::{WebView, WebViewBuilder};
 
 use crate::config::{Config, Theme};
 use crate::markdown;
@@ -15,10 +16,18 @@ const ICON_PNG: &[u8] = include_bytes!("../assets/mdview.iconset/icon_256x256.pn
 const WELCOME_LOGO: &[u8] = include_bytes!("../assets/welcome_logo.png");
 
 enum UserEvent {
-    FileChanged,
-    Navigate(PathBuf),
+    FileChanged(WindowId),
+    Navigate(WindowId, PathBuf),
     MenuEvent(MenuEvent),
-    ApplySettings(String),
+    ApplySettings(WindowId, String),
+}
+
+struct WindowState {
+    window: Window,
+    webview: WebView,
+    current_file: Option<PathBuf>,
+    in_settings: bool,
+    _watcher: Option<RecommendedWatcher>,
 }
 
 fn title_for_file(file: &Option<PathBuf>) -> String {
@@ -97,10 +106,97 @@ body {{
     )
 }
 
+fn create_window_state(
+    file: Option<PathBuf>,
+    config: &Config,
+    event_loop: &EventLoopWindowTarget<UserEvent>,
+    proxy: &EventLoopProxy<UserEvent>,
+) -> WindowState {
+    let window_icon = load_window_icon();
+    let window = WindowBuilder::new()
+        .with_title(title_for_file(&file))
+        .with_inner_size(tao::dpi::LogicalSize::new(960.0, 800.0))
+        .with_window_icon(window_icon)
+        .build(event_loop)
+        .expect("Failed to create window");
+
+    let window_id = window.id();
+
+    let html = match &file {
+        Some(f) => load_and_render(f, config),
+        None => welcome_html(config),
+    };
+
+    let nav_proxy = proxy.clone();
+    let nav_wid = window_id;
+    let ipc_proxy = proxy.clone();
+    let ipc_wid = window_id;
+
+    let webview = WebViewBuilder::new()
+        .with_html(&html)
+        .with_navigation_handler(move |uri| {
+            if let Some(file_param) = uri.strip_prefix("mdview://open?file=") {
+                let decoded = urlencoding_decode(file_param);
+                let path = PathBuf::from(decoded);
+                let _ = nav_proxy.send_event(UserEvent::Navigate(nav_wid, path));
+                return false;
+            }
+            true
+        })
+        .with_ipc_handler(move |msg| {
+            let body = msg.body();
+            if body.starts_with("settings:") {
+                let json = &body["settings:".len()..];
+                let _ = ipc_proxy.send_event(UserEvent::ApplySettings(ipc_wid, json.to_string()));
+            }
+        })
+        .build(&window)
+        .expect("Failed to create webview");
+
+    let _watcher = file.as_ref().map(|f| {
+        let watch_proxy = proxy.clone();
+        let wid = window_id;
+        let (w, rx) = watcher::watch(f);
+        std::thread::spawn(move || {
+            while rx.recv().is_ok() {
+                let _ = watch_proxy.send_event(UserEvent::FileChanged(wid));
+                std::thread::sleep(std::time::Duration::from_millis(200));
+                while rx.try_recv().is_ok() {}
+            }
+        });
+        w
+    });
+
+    WindowState {
+        window,
+        webview,
+        current_file: file,
+        in_settings: false,
+        _watcher,
+    }
+}
+
+fn start_watcher(
+    file: &PathBuf,
+    window_id: WindowId,
+    proxy: &EventLoopProxy<UserEvent>,
+) -> RecommendedWatcher {
+    let watch_proxy = proxy.clone();
+    let wid = window_id;
+    let (w, rx) = watcher::watch(file);
+    std::thread::spawn(move || {
+        while rx.recv().is_ok() {
+            let _ = watch_proxy.send_event(UserEvent::FileChanged(wid));
+            std::thread::sleep(std::time::Duration::from_millis(200));
+            while rx.try_recv().is_ok() {}
+        }
+    });
+    w
+}
+
 pub fn run(file: Option<PathBuf>, config: Config) {
     let config = Arc::new(Mutex::new(config));
 
-    // Set dock icon before event loop / window creation
     set_macos_dock_icon();
 
     let event_loop = EventLoopBuilder::<UserEvent>::with_user_event()
@@ -109,7 +205,6 @@ pub fn run(file: Option<PathBuf>, config: Config) {
     // Build macOS menu bar
     let menu_bar = Menu::new();
 
-    // App menu (MdViewer)
     let app_menu = Submenu::new("MdViewer", true);
     let settings_item = MenuItem::with_id(
         "settings",
@@ -136,7 +231,6 @@ pub fn run(file: Option<PathBuf>, config: Config) {
         &PredefinedMenuItem::quit(None),
     ]);
 
-    // File menu
     let file_menu = Submenu::new("File", true);
     let open_item = MenuItem::with_id(
         "open",
@@ -144,13 +238,19 @@ pub fn run(file: Option<PathBuf>, config: Config) {
         true,
         Some("CmdOrCtrl+O".parse().unwrap()),
     );
+    let new_item = MenuItem::with_id(
+        "new",
+        "New Window",
+        true,
+        Some("CmdOrCtrl+N".parse().unwrap()),
+    );
     let _ = file_menu.append_items(&[
+        &new_item,
         &open_item,
         &PredefinedMenuItem::separator(),
         &PredefinedMenuItem::close_window(None),
     ]);
 
-    // Edit menu
     let edit_menu = Submenu::new("Edit", true);
     let _ = edit_menu.append_items(&[
         &PredefinedMenuItem::undo(None),
@@ -162,7 +262,6 @@ pub fn run(file: Option<PathBuf>, config: Config) {
         &PredefinedMenuItem::select_all(None),
     ]);
 
-    // View menu
     let view_menu = Submenu::new("View", true);
     let reload_item = MenuItem::with_id(
         "reload",
@@ -176,7 +275,6 @@ pub fn run(file: Option<PathBuf>, config: Config) {
         &PredefinedMenuItem::fullscreen(None),
     ]);
 
-    // Window menu
     let window_menu = Submenu::new("Window", true);
     let _ = window_menu.append_items(&[
         &PredefinedMenuItem::minimize(None),
@@ -195,102 +293,55 @@ pub fn run(file: Option<PathBuf>, config: Config) {
 
     menu_bar.init_for_nsapp();
 
-    // Forward menu events to the event loop
     let menu_proxy = event_loop.create_proxy();
     MenuEvent::set_event_handler(Some(move |event| {
         let _ = menu_proxy.send_event(UserEvent::MenuEvent(event));
     }));
 
-    let window_icon = load_window_icon();
-    let window = WindowBuilder::new()
-        .with_title(title_for_file(&file))
-        .with_inner_size(tao::dpi::LogicalSize::new(960.0, 800.0))
-        .with_window_icon(window_icon)
-        .build(&event_loop)
-        .expect("Failed to create window");
+    let proxy = event_loop.create_proxy();
 
-    let current_file: Arc<Mutex<Option<PathBuf>>> = Arc::new(Mutex::new(file.clone()));
-    let current_file_nav = current_file.clone();
-    let current_file_reload = current_file.clone();
-    let current_file_settings = current_file.clone();
-    let in_settings = Arc::new(Mutex::new(false));
-    let in_settings_nav = in_settings.clone();
-    let in_settings_ipc = in_settings.clone();
+    // Create initial window
+    let initial_state = create_window_state(
+        file,
+        &config.lock().unwrap(),
+        &event_loop,
+        &proxy,
+    );
+    let initial_id = initial_state.window.id();
 
-    let html = match &file {
-        Some(f) => load_and_render(f, &config.lock().unwrap()),
-        None => welcome_html(&config.lock().unwrap()),
-    };
-
-    let nav_proxy = event_loop.create_proxy();
-    let ipc_proxy = event_loop.create_proxy();
-
-    let webview = WebViewBuilder::new()
-        .with_html(&html)
-        .with_navigation_handler(move |uri| {
-            if *in_settings_nav.lock().unwrap() {
-                return true;
-            }
-            if let Some(file_param) = uri.strip_prefix("mdview://open?file=") {
-                let decoded = urlencoding_decode(file_param);
-                let path = PathBuf::from(decoded);
-                let _ = nav_proxy.send_event(UserEvent::Navigate(path));
-                return false;
-            }
-            true
-        })
-        .with_ipc_handler(move |msg| {
-            let body = msg.body();
-            if body.starts_with("settings:") {
-                let json = &body["settings:".len()..];
-                let _ = ipc_proxy.send_event(UserEvent::ApplySettings(json.to_string()));
-            }
-        })
-        .build(&window)
-        .expect("Failed to create webview");
-
-    // Start file watcher if we have a file
-    let _watcher: Option<(RecommendedWatcher, std::sync::mpsc::Receiver<()>)> =
-        file.as_ref().map(|f| {
-            let watch_proxy = event_loop.create_proxy();
-            let (w, rx) = watcher::watch(f);
-            std::thread::spawn(move || {
-                while rx.recv().is_ok() {
-                    let _ = watch_proxy.send_event(UserEvent::FileChanged);
-                    std::thread::sleep(std::time::Duration::from_millis(200));
-                    while rx.try_recv().is_ok() {}
-                }
-            });
-            (w, std::sync::mpsc::channel().1) // keep watcher alive
-        });
+    let mut windows: HashMap<WindowId, WindowState> = HashMap::new();
+    windows.insert(initial_id, initial_state);
+    let mut focused_window: Option<WindowId> = Some(initial_id);
 
     let open_id = open_item.id().clone();
+    let new_id = new_item.id().clone();
     let reload_id = reload_item.id().clone();
     let settings_id = settings_item.id().clone();
 
-    event_loop.run(move |event, _, control_flow| {
+    event_loop.run(move |event, event_loop, control_flow| {
         *control_flow = ControlFlow::Wait;
 
         match event {
-            Event::UserEvent(UserEvent::FileChanged) => {
-                if *in_settings.lock().unwrap() {
-                    return;
-                }
-                let f = current_file.lock().unwrap().clone();
-                if let Some(f) = &f {
-                    let html = load_and_render(f, &config.lock().unwrap());
-                    let _ = webview.load_html(&html);
+            Event::UserEvent(UserEvent::FileChanged(wid)) => {
+                if let Some(state) = windows.get(&wid) {
+                    if state.in_settings {
+                        return;
+                    }
+                    if let Some(f) = &state.current_file {
+                        let html = load_and_render(f, &config.lock().unwrap());
+                        let _ = state.webview.load_html(&html);
+                    }
                 }
             }
-            Event::UserEvent(UserEvent::Navigate(path)) => {
-                if path.exists() {
-                    let file_opt = Some(path.clone());
-                    *current_file_nav.lock().unwrap() = file_opt.clone();
-                    let html = load_and_render(&path, &config.lock().unwrap());
-                    let _ = webview.load_html(&html);
-                    window.set_title(&title_for_file(&file_opt));
-                } else {
-                    eprintln!("File not found: {}", path.display());
+            Event::UserEvent(UserEvent::Navigate(wid, path)) => {
+                if let Some(state) = windows.get_mut(&wid) {
+                    if path.exists() {
+                        let html = load_and_render(&path, &config.lock().unwrap());
+                        let _ = state.webview.load_html(&html);
+                        state.current_file = Some(path.clone());
+                        state.window.set_title(&title_for_file(&state.current_file));
+                        state._watcher = Some(start_watcher(&path, wid, &proxy));
+                    }
                 }
             }
             Event::UserEvent(UserEvent::MenuEvent(event)) => {
@@ -300,47 +351,105 @@ pub fn run(file: Option<PathBuf>, config: Config) {
                         .set_title("Open Markdown File");
                     if let Some(path) = dialog.pick_file() {
                         let path = std::fs::canonicalize(&path).unwrap_or(path);
-                        let file_opt = Some(path.clone());
-                        *current_file_nav.lock().unwrap() = file_opt.clone();
-                        let html = load_and_render(&path, &config.lock().unwrap());
-                        let _ = webview.load_html(&html);
-                        window.set_title(&title_for_file(&file_opt));
-                        *in_settings_ipc.lock().unwrap() = false;
+                        // If focused window is welcome screen, reuse it
+                        let reuse = focused_window.and_then(|wid| {
+                            let s = windows.get(&wid)?;
+                            if s.current_file.is_none() && !s.in_settings {
+                                Some(wid)
+                            } else {
+                                None
+                            }
+                        });
+                        if let Some(wid) = reuse {
+                            let state = windows.get_mut(&wid).unwrap();
+                            let html = load_and_render(&path, &config.lock().unwrap());
+                            let _ = state.webview.load_html(&html);
+                            state.current_file = Some(path.clone());
+                            state.in_settings = false;
+                            state.window.set_title(&title_for_file(&state.current_file));
+                            state._watcher = Some(start_watcher(&path, wid, &proxy));
+                        } else {
+                            let state = create_window_state(
+                                Some(path),
+                                &config.lock().unwrap(),
+                                event_loop,
+                                &proxy,
+                            );
+                            let wid = state.window.id();
+                            windows.insert(wid, state);
+                            focused_window = Some(wid);
+                        }
                     }
+                } else if event.id == new_id {
+                    let state = create_window_state(
+                        None,
+                        &config.lock().unwrap(),
+                        event_loop,
+                        &proxy,
+                    );
+                    let wid = state.window.id();
+                    windows.insert(wid, state);
+                    focused_window = Some(wid);
                 } else if event.id == reload_id {
-                    *in_settings_ipc.lock().unwrap() = false;
-                    let f = current_file_reload.lock().unwrap().clone();
-                    if let Some(f) = &f {
-                        let html = load_and_render(f, &config.lock().unwrap());
-                        let _ = webview.load_html(&html);
+                    if let Some(wid) = focused_window {
+                        if let Some(state) = windows.get_mut(&wid) {
+                            state.in_settings = false;
+                            if let Some(f) = &state.current_file {
+                                let html = load_and_render(f, &config.lock().unwrap());
+                                let _ = state.webview.load_html(&html);
+                            }
+                            state.window.set_title(&title_for_file(&state.current_file));
+                        }
                     }
-                    window.set_title(&title_for_file(&f));
                 } else if event.id == settings_id {
-                    *in_settings_ipc.lock().unwrap() = true;
-                    let html = settings_html(&config.lock().unwrap());
-                    let _ = webview.load_html(&html);
-                    window.set_title("MdViewer - Settings");
+                    if let Some(wid) = focused_window {
+                        if let Some(state) = windows.get_mut(&wid) {
+                            state.in_settings = true;
+                            let html = settings_html(&config.lock().unwrap());
+                            let _ = state.webview.load_html(&html);
+                            state.window.set_title("MdViewer - Settings");
+                        }
+                    }
                 }
             }
-            Event::UserEvent(UserEvent::ApplySettings(json)) => {
+            Event::UserEvent(UserEvent::ApplySettings(_wid, json)) => {
                 let mut cfg = config.lock().unwrap();
                 apply_settings_from_json(&json, &mut cfg);
                 cfg.save();
 
-                *in_settings_ipc.lock().unwrap() = false;
-                let f = current_file_settings.lock().unwrap().clone();
-                let html = match &f {
-                    Some(f) => load_and_render(f, &cfg),
-                    None => welcome_html(&cfg),
-                };
-                let _ = webview.load_html(&html);
-                window.set_title(&title_for_file(&f));
+                // Refresh all windows with new settings
+                for (id, state) in windows.iter_mut() {
+                    state.in_settings = false;
+                    let html = match &state.current_file {
+                        Some(f) => load_and_render(f, &cfg),
+                        None => welcome_html(&cfg),
+                    };
+                    let _ = state.webview.load_html(&html);
+                    state.window.set_title(&title_for_file(&state.current_file));
+                    let _ = id; // suppress unused warning
+                }
+                // But keep settings open on the window that triggered it
+                // (already refreshed above, the user sees the rendered view)
+            }
+            Event::WindowEvent {
+                event: WindowEvent::Focused(true),
+                window_id,
+                ..
+            } => {
+                focused_window = Some(window_id);
             }
             Event::WindowEvent {
                 event: WindowEvent::CloseRequested,
+                window_id,
                 ..
             } => {
-                *control_flow = ControlFlow::Exit;
+                windows.remove(&window_id);
+                if focused_window == Some(window_id) {
+                    focused_window = windows.keys().next().copied();
+                }
+                if windows.is_empty() {
+                    *control_flow = ControlFlow::Exit;
+                }
             }
             _ => {}
         }

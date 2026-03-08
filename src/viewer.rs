@@ -111,6 +111,7 @@ fn create_window_state(
     config: &Config,
     event_loop: &EventLoopWindowTarget<UserEvent>,
     proxy: &EventLoopProxy<UserEvent>,
+    menu_bar: &Menu,
 ) -> WindowState {
     let window_icon = load_window_icon();
     let window = WindowBuilder::new()
@@ -119,6 +120,20 @@ fn create_window_state(
         .with_window_icon(window_icon)
         .build(event_loop)
         .expect("Failed to create window");
+
+    // Attach menu to window on Windows/Linux
+    #[cfg(target_os = "windows")]
+    {
+        use tao::platform::windows::WindowExtWindows;
+        unsafe { let _ = menu_bar.init_for_hwnd(window.hwnd() as isize); }
+    }
+    #[cfg(target_os = "linux")]
+    {
+        use tao::platform::unix::WindowExtUnix;
+        let _ = menu_bar.init_for_gtk_window(window.gtk_window(), None);
+    }
+    #[cfg(not(any(target_os = "windows", target_os = "linux")))]
+    let _ = menu_bar; // suppress unused warning on macOS
 
     let window_id = window.id();
 
@@ -291,6 +306,7 @@ pub fn run(file: Option<PathBuf>, config: Config) {
         &window_menu,
     ]);
 
+    #[cfg(target_os = "macos")]
     menu_bar.init_for_nsapp();
 
     let menu_proxy = event_loop.create_proxy();
@@ -306,6 +322,7 @@ pub fn run(file: Option<PathBuf>, config: Config) {
         &config.lock().unwrap(),
         &event_loop,
         &proxy,
+        &menu_bar,
     );
     let initial_id = initial_state.window.id();
 
@@ -374,6 +391,7 @@ pub fn run(file: Option<PathBuf>, config: Config) {
                                 &config.lock().unwrap(),
                                 event_loop,
                                 &proxy,
+                                &menu_bar,
                             );
                             let wid = state.window.id();
                             windows.insert(wid, state);
@@ -386,6 +404,7 @@ pub fn run(file: Option<PathBuf>, config: Config) {
                         &config.lock().unwrap(),
                         event_loop,
                         &proxy,
+                        &menu_bar,
                     );
                     let wid = state.window.id();
                     windows.insert(wid, state);

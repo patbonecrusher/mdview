@@ -130,7 +130,7 @@ fn create_window_state(
     #[cfg(target_os = "linux")]
     {
         use tao::platform::unix::WindowExtUnix;
-        let _ = menu_bar.init_for_gtk_window(window.gtk_window(), None);
+        let _ = menu_bar.init_for_gtk_window(window.gtk_window(), window.default_vbox());
     }
     #[cfg(not(any(target_os = "windows", target_os = "linux")))]
     let _ = menu_bar; // suppress unused warning on macOS

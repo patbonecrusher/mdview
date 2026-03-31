@@ -3,10 +3,18 @@ set -e
 
 BIN_NAME="mdview"
 APP_NAME="MdViewer"
-APP_DIR="target/release/${APP_NAME}.app"
+SIGNING_IDENTITY="Developer ID Application: Patrick Laplante (VZU8A7CZL3)"
 
-echo "Building release..."
-cargo build --release
+# Support CI: use target dir if BINARY_PATH is set, otherwise build locally
+if [ -n "$BINARY_PATH" ]; then
+    APP_DIR="${APP_NAME}.app"
+    BINARY="$BINARY_PATH"
+else
+    echo "Building release..."
+    cargo build --release
+    APP_DIR="target/release/${APP_NAME}.app"
+    BINARY="target/release/${BIN_NAME}"
+fi
 
 echo "Creating app bundle..."
 rm -rf "$APP_DIR"
@@ -14,7 +22,7 @@ mkdir -p "$APP_DIR/Contents/MacOS"
 mkdir -p "$APP_DIR/Contents/Resources"
 
 # Copy binary
-cp "target/release/${BIN_NAME}" "$APP_DIR/Contents/MacOS/${BIN_NAME}"
+cp "$BINARY" "$APP_DIR/Contents/MacOS/${BIN_NAME}"
 
 # Copy icon
 cp "assets/mdview.icns" "$APP_DIR/Contents/Resources/mdview.icns"
@@ -44,7 +52,7 @@ cat > "$APP_DIR/Contents/Info.plist" << 'PLIST'
     <key>NSHighResolutionCapable</key>
     <true/>
     <key>LSMinimumSystemVersion</key>
-    <string>10.15</string>
+    <string>11.0</string>
     <key>CFBundleDocumentTypes</key>
     <array>
         <dict>
@@ -67,7 +75,36 @@ cat > "$APP_DIR/Contents/Info.plist" << 'PLIST'
 </plist>
 PLIST
 
-echo "Done! App bundle at: $APP_DIR"
-echo ""
-echo "To install: cp -r \"$APP_DIR\" /Applications/"
-echo "To run:     open \"$APP_DIR\" --args /path/to/file.md"
+# Sign if identity is available
+if security find-identity -v -p codesigning | grep -q "$SIGNING_IDENTITY"; then
+    echo "Signing app..."
+    codesign --force --options runtime --sign "$SIGNING_IDENTITY" --deep "$APP_DIR"
+    codesign -vvv "$APP_DIR"
+
+    if [ "$1" = "--notarize" ]; then
+        echo "Creating zip for notarization..."
+        ditto -c -k --keepParent "$APP_DIR" "${APP_NAME}.zip"
+
+        echo "Submitting for notarization..."
+        xcrun notarytool submit "${APP_NAME}.zip" \
+            --keychain-profile "notarize-profile" \
+            --wait
+
+        echo "Stapling notarization ticket..."
+        xcrun stapler staple "$APP_DIR"
+
+        rm -f "${APP_NAME}.zip"
+        echo ""
+        echo "Done! App is signed, notarized, and stapled."
+    else
+        echo ""
+        echo "Done! App is signed with Developer ID."
+        echo "    To also notarize, run: ./bundle.sh --notarize"
+    fi
+else
+    echo ""
+    echo "Done! App bundle at: $APP_DIR (unsigned)"
+fi
+
+echo "    Run with: open $APP_DIR"
+echo "    Install:  cp -r \"$APP_DIR\" /Applications/"

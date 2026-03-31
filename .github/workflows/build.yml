@@ -18,45 +18,37 @@ jobs:
           targets: aarch64-apple-darwin
       - name: Build
         run: cargo build --release --target aarch64-apple-darwin
-      - name: Bundle app
+      - name: Import signing certificate
+        env:
+          MACOS_CERTIFICATE: ${{ secrets.MACOS_CERTIFICATE }}
+          MACOS_CERTIFICATE_PWD: ${{ secrets.MACOS_CERTIFICATE_PWD }}
         run: |
-          APP_DIR="MdViewer.app"
-          mkdir -p "$APP_DIR/Contents/MacOS"
-          mkdir -p "$APP_DIR/Contents/Resources"
-          cp target/aarch64-apple-darwin/release/mdview "$APP_DIR/Contents/MacOS/"
-          cp assets/mdview.icns "$APP_DIR/Contents/Resources/"
-          cat > "$APP_DIR/Contents/Info.plist" << 'PLIST'
-          <?xml version="1.0" encoding="UTF-8"?>
-          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-          <plist version="1.0">
-          <dict>
-              <key>CFBundleName</key><string>MdViewer</string>
-              <key>CFBundleDisplayName</key><string>MdViewer</string>
-              <key>CFBundleIdentifier</key><string>com.mdviewer.app</string>
-              <key>CFBundleVersion</key><string>0.1.0</string>
-              <key>CFBundleShortVersionString</key><string>0.1.0</string>
-              <key>CFBundlePackageType</key><string>APPL</string>
-              <key>CFBundleExecutable</key><string>mdview</string>
-              <key>CFBundleIconFile</key><string>mdview</string>
-              <key>CFBundleIconName</key><string>mdview</string>
-              <key>NSHighResolutionCapable</key><true/>
-              <key>LSMinimumSystemVersion</key><string>11.0</string>
-              <key>CFBundleDocumentTypes</key>
-              <array>
-                  <dict>
-                      <key>CFBundleTypeName</key><string>Markdown Document</string>
-                      <key>CFBundleTypeRole</key><string>Viewer</string>
-                      <key>LSHandlerRank</key><string>Alternate</string>
-                      <key>CFBundleTypeExtensions</key>
-                      <array>
-                          <string>md</string>
-                          <string>markdown</string>
-                      </array>
-                  </dict>
-              </array>
-          </dict>
-          </plist>
-          PLIST
+          echo "$MACOS_CERTIFICATE" | base64 --decode > certificate.p12
+          KEYCHAIN_PWD=$(uuidgen)
+          security create-keychain -p "$KEYCHAIN_PWD" build.keychain
+          security default-keychain -s build.keychain
+          security unlock-keychain -p "$KEYCHAIN_PWD" build.keychain
+          security import certificate.p12 -k build.keychain -P "$MACOS_CERTIFICATE_PWD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PWD" build.keychain
+          rm certificate.p12
+      - name: Bundle, sign, and notarize
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+        run: |
+          BINARY_PATH="target/aarch64-apple-darwin/release/mdview" bash bundle.sh
+
+          # Notarize
+          ditto -c -k --keepParent MdViewer.app MdViewer.zip
+          xcrun notarytool submit MdViewer.zip \
+            --apple-id "$APPLE_ID" \
+            --team-id "$APPLE_TEAM_ID" \
+            --password "$APPLE_APP_PASSWORD" \
+            --wait
+          xcrun stapler staple MdViewer.app
+          rm MdViewer.zip
+
           tar czf MdViewer-macos-arm64.tar.gz MdViewer.app
       - uses: actions/upload-artifact@v4
         with:
@@ -70,11 +62,6 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: x86_64-pc-windows-msvc
-      - name: Install WebView2
-        run: |
-          Invoke-WebRequest -Uri "https://go.microsoft.com/fwlink/p/?LinkId=2124703" -OutFile "$env:TEMP\MicrosoftEdgeWebview2Setup.exe"
-          Start-Process -FilePath "$env:TEMP\MicrosoftEdgeWebview2Setup.exe" -ArgumentList "/silent", "/install" -Wait
-        shell: pwsh
       - name: Build
         run: cargo build --release --target x86_64-pc-windows-msvc
       - name: Package
@@ -95,11 +82,6 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: aarch64-pc-windows-msvc
-      - name: Install WebView2
-        run: |
-          Invoke-WebRequest -Uri "https://go.microsoft.com/fwlink/p/?LinkId=2124703" -OutFile "$env:TEMP\MicrosoftEdgeWebview2Setup.exe"
-          Start-Process -FilePath "$env:TEMP\MicrosoftEdgeWebview2Setup.exe" -ArgumentList "/silent", "/install" -Wait
-        shell: pwsh
       - name: Build
         run: cargo build --release --target aarch64-pc-windows-msvc
       - name: Package
@@ -171,13 +153,18 @@ jobs:
     permissions:
       contents: write
     steps:
+      - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
       - name: Create release
-        uses: softprops/action-gh-release@v2
-        with:
-          files: |
-            MdViewer-macos-arm64/MdViewer-macos-arm64.tar.gz
-            MdViewer-windows-x64/MdViewer-windows-x64.zip
-            MdViewer-windows-arm64/MdViewer-windows-arm64.zip
-            MdViewer-linux-x64/MdViewer-linux-x64.tar.gz
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="${GITHUB_REF#refs/tags/}"
+          gh release create "$TAG" \
+            --title "MdViewer $TAG" \
+            --generate-notes \
+            MdViewer-macos-arm64/MdViewer-macos-arm64.tar.gz \
+            MdViewer-windows-x64/MdViewer-windows-x64.zip \
+            MdViewer-windows-arm64/MdViewer-windows-arm64.zip \
+            MdViewer-linux-x64/MdViewer-linux-x64.tar.gz \
             MdViewer-linux-arm64/MdViewer-linux-arm64.tar.gz

@@ -1,0 +1,176 @@
+:root {
+    --bg: #ffffff;
+    --fg: #1a1a2e;
+    --code-bg: #f4f4f8;
+    --border: #e0e0e0;
+    --link: #2563eb;
+    --heading: #0f172a;
+    --blockquote-border: #3b82f6;
+    --blockquote-bg: #eff6ff;
+}
+
+@media (prefers-color-scheme: dark) {
+    :root {
+        --bg: #08131c;
+        --fg: #e2e8f0;
+        --code-bg: #0f1f2e;
+        --border: #1a3044;
+        --link: #60a5fa;
+        --heading: #f1f5f9;
+        --blockquote-border: #3b82f6;
+        --blockquote-bg: #0c1a28;
+    }
+}
+
+* {
+    box-sizing: border-box;
+}
+
+body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+    line-height: 1.7;
+    color: var(--fg);
+    background-color: var(--bg);
+    margin: 0;
+    padding: 0;
+}
+
+.container {
+    max-width: 90%;
+    margin: 0 auto;
+    padding: 1rem 2.5rem;
+}
+
+h1, h2, h3, h4, h5, h6 {
+    color: var(--heading);
+    margin-top: 1.2em;
+    margin-bottom: 0.6em;
+    font-weight: 600;
+    line-height: 1.3;
+}
+
+.container > *:first-child {
+    margin-top: 0;
+}
+
+h1 { font-size: 2em; border-bottom: 2px solid var(--border); padding-bottom: 0.3em; }
+h2 { font-size: 1.5em; border-bottom: 1px solid var(--border); padding-bottom: 0.2em; }
+h3 { font-size: 1.25em; }
+
+a {
+    color: var(--link);
+    text-decoration: none;
+}
+
+a:hover {
+    text-decoration: underline;
+}
+
+code {
+    background: var(--code-bg);
+    padding: 0.15em 0.4em;
+    border-radius: 4px;
+    font-size: 0.9em;
+    font-family: "SF Mono", "Fira Code", "Cascadia Code", monospace;
+}
+
+pre {
+    background: var(--code-bg);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 1em 1.2em;
+    overflow-x: auto;
+    line-height: 1.5;
+}
+
+pre code {
+    background: none;
+    padding: 0;
+    font-size: 0.85em;
+}
+
+pre code.hljs {
+    background: var(--code-bg);
+    border-radius: 8px;
+}
+
+blockquote {
+    border-left: 4px solid var(--blockquote-border);
+    background: var(--blockquote-bg);
+    margin: 1em 0;
+    padding: 0.5em 1em;
+    border-radius: 0 8px 8px 0;
+}
+
+table {
+    border-collapse: collapse;
+    width: 100%;
+    margin: 1em 0;
+}
+
+th, td {
+    border: 1px solid var(--border);
+    padding: 0.5em 0.8em;
+    text-align: left;
+}
+
+th {
+    background: var(--code-bg);
+    font-weight: 600;
+}
+
+img {
+    max-width: 100%;
+    height: auto;
+}
+
+.mermaid {
+    text-align: center;
+    margin: 1.5em 0;
+}
+
+.plantuml {
+    text-align: center;
+    margin: 1.5em 0;
+}
+
+.plantuml img {
+    max-width: 100%;
+}
+
+.svg-container {
+    text-align: center;
+    margin: 1.5em 0;
+}
+
+.svg-container svg {
+    max-width: 100%;
+    height: auto;
+}
+
+.svg-container svg text {
+    fill: var(--fg);
+}
+
+.svg-container svg line,
+.svg-container svg path:not([fill]),
+.svg-container svg rect:not([fill]),
+.svg-container svg circle:not([fill]),
+.svg-container svg polyline:not([fill]),
+.svg-container svg polygon:not([fill]) {
+    stroke: var(--fg);
+}
+
+.plantuml img {
+    border-radius: 8px;
+}
+
+hr {
+    border: none;
+    border-top: 2px solid var(--border);
+    margin: 2em 0;
+}
+
+input[type="checkbox"] {
+    margin-right: 0.4em;
+}

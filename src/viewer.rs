@@ -28,6 +28,7 @@ struct WindowState {
     current_file: Option<PathBuf>,
     in_settings: bool,
     _watcher: Option<RecommendedWatcher>,
+    zoom_level: f64,
 }
 
 fn title_for_file(file: &Option<PathBuf>) -> String {
@@ -188,6 +189,7 @@ fn create_window_state(
         current_file: file,
         in_settings: false,
         _watcher,
+        zoom_level: 1.0,
     }
 }
 
@@ -212,7 +214,7 @@ fn start_watcher(
 pub fn run(file: Option<PathBuf>, config: Config) {
     let config = Arc::new(Mutex::new(config));
 
-    set_macos_dock_icon();
+    set_macos_activation_policy();
 
     let event_loop = EventLoopBuilder::<UserEvent>::with_user_event()
         .build();
@@ -284,8 +286,30 @@ pub fn run(file: Option<PathBuf>, config: Config) {
         true,
         Some("CmdOrCtrl+R".parse().unwrap()),
     );
+    let zoom_in_item = MenuItem::with_id(
+        "zoom_in",
+        "Zoom In",
+        true,
+        Some("CmdOrCtrl+=".parse().unwrap()),
+    );
+    let zoom_out_item = MenuItem::with_id(
+        "zoom_out",
+        "Zoom Out",
+        true,
+        Some("CmdOrCtrl+-".parse().unwrap()),
+    );
+    let zoom_reset_item = MenuItem::with_id(
+        "zoom_reset",
+        "Actual Size",
+        true,
+        Some("CmdOrCtrl+0".parse().unwrap()),
+    );
     let _ = view_menu.append_items(&[
         &reload_item,
+        &PredefinedMenuItem::separator(),
+        &zoom_in_item,
+        &zoom_out_item,
+        &zoom_reset_item,
         &PredefinedMenuItem::separator(),
         &PredefinedMenuItem::fullscreen(None),
     ]);
@@ -334,6 +358,9 @@ pub fn run(file: Option<PathBuf>, config: Config) {
     let new_id = new_item.id().clone();
     let reload_id = reload_item.id().clone();
     let settings_id = settings_item.id().clone();
+    let zoom_in_id = zoom_in_item.id().clone();
+    let zoom_out_id = zoom_out_item.id().clone();
+    let zoom_reset_id = zoom_reset_item.id().clone();
 
     event_loop.run(move |event, event_loop, control_flow| {
         *control_flow = ControlFlow::Wait;
@@ -429,6 +456,29 @@ pub fn run(file: Option<PathBuf>, config: Config) {
                             state.window.set_title("MdViewer - Settings");
                         }
                     }
+                } else if event.id == zoom_in_id {
+                    if let Some(wid) = focused_window {
+                        if let Some(state) = windows.get_mut(&wid) {
+                            state.zoom_level = (state.zoom_level * 1.1).min(5.0);
+                            let pct = (state.zoom_level * 100.0) as u32;
+                            let _ = state.webview.evaluate_script(&format!("document.body.style.zoom = '{}%'", pct));
+                        }
+                    }
+                } else if event.id == zoom_out_id {
+                    if let Some(wid) = focused_window {
+                        if let Some(state) = windows.get_mut(&wid) {
+                            state.zoom_level = (state.zoom_level / 1.1).max(0.3);
+                            let pct = (state.zoom_level * 100.0) as u32;
+                            let _ = state.webview.evaluate_script(&format!("document.body.style.zoom = '{}%'", pct));
+                        }
+                    }
+                } else if event.id == zoom_reset_id {
+                    if let Some(wid) = focused_window {
+                        if let Some(state) = windows.get_mut(&wid) {
+                            state.zoom_level = 1.0;
+                            let _ = state.webview.evaluate_script("document.body.style.zoom = '100%'");
+                        }
+                    }
                 }
             }
             Event::UserEvent(UserEvent::ApplySettings(_wid, json)) => {
@@ -449,6 +499,43 @@ pub fn run(file: Option<PathBuf>, config: Config) {
                 }
                 // But keep settings open on the window that triggered it
                 // (already refreshed above, the user sees the rendered view)
+            }
+            Event::Opened { urls } => {
+                for url in urls {
+                    if let Ok(path) = url.to_file_path() {
+                        if path.exists() {
+                            // Reuse a welcome screen window if available
+                            let reuse = windows.iter().find_map(|(wid, s)| {
+                                if s.current_file.is_none() && !s.in_settings {
+                                    Some(*wid)
+                                } else {
+                                    None
+                                }
+                            });
+                            if let Some(wid) = reuse {
+                                let state = windows.get_mut(&wid).unwrap();
+                                let html = load_and_render(&path, &config.lock().unwrap());
+                                let _ = state.webview.load_html(&html);
+                                state.current_file = Some(path.clone());
+                                state.in_settings = false;
+                                state.window.set_title(&title_for_file(&state.current_file));
+                                state._watcher = Some(start_watcher(&path, wid, &proxy));
+                                focused_window = Some(wid);
+                            } else {
+                                let state = create_window_state(
+                                    Some(path),
+                                    &config.lock().unwrap(),
+                                    event_loop,
+                                    &proxy,
+                                    &menu_bar,
+                                );
+                                let wid = state.window.id();
+                                windows.insert(wid, state);
+                                focused_window = Some(wid);
+                            }
+                        }
+                    }
+                }
             }
             Event::WindowEvent {
                 event: WindowEvent::Focused(true),
@@ -800,25 +887,17 @@ fn load_window_icon() -> Option<tao::window::Icon> {
 }
 
 #[cfg(target_os = "macos")]
-fn set_macos_dock_icon() {
-    use objc2::AnyThread;
+fn set_macos_activation_policy() {
     use objc2::MainThreadMarker;
-    use objc2_app_kit::{NSApplication, NSImage, NSApplicationActivationPolicy};
-    use objc2_foundation::NSData;
+    use objc2_app_kit::{NSApplication, NSApplicationActivationPolicy};
 
     let mtm = MainThreadMarker::new().expect("must be called from main thread");
     let app = NSApplication::sharedApplication(mtm);
-
     app.setActivationPolicy(NSApplicationActivationPolicy::Regular);
-
-    let data = NSData::with_bytes(ICON_PNG);
-    if let Some(image) = NSImage::initWithData(NSImage::alloc(), &data) {
-        unsafe { app.setApplicationIconImage(Some(&image)) };
-    }
 }
 
 #[cfg(not(target_os = "macos"))]
-fn set_macos_dock_icon() {}
+fn set_macos_activation_policy() {}
 
 fn urlencoding_decode(s: &str) -> String {
     let mut result = String::new();

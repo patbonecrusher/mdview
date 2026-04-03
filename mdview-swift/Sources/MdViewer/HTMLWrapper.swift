@@ -62,7 +62,7 @@ enum HTMLWrapper {
     }
 
     private static func loadCSS() -> String? {
-        guard let url = Bundle.module.url(forResource: "style", withExtension: "css") else { return nil }
+        guard let url = resourceBundle.url(forResource: "style", withExtension: "css") else { return nil }
         return try? String(contentsOf: url, encoding: .utf8)
     }
 }

@@ -24,6 +24,13 @@ mkdir -p "$APP_DIR/Contents/Resources"
 # Copy binary
 cp "$BINARY" "$APP_DIR/Contents/MacOS/${BIN_NAME}"
 
+# Copy SPM resource bundle if present (Swift build)
+RESOURCE_BUNDLE="$(dirname "$BINARY")/MdViewer_MdViewer.bundle"
+if [ -d "$RESOURCE_BUNDLE" ]; then
+    echo "Copying SPM resource bundle..."
+    cp -R "$RESOURCE_BUNDLE" "$APP_DIR/Contents/Resources/"
+fi
+
 # Copy icon
 cp "assets/mdview.icns" "$APP_DIR/Contents/Resources/mdview.icns"
 

@@ -62,7 +62,7 @@ enum Theme: String, CaseIterable {
     }
 
     private func loadResource(_ name: String, ext: String) -> String? {
-        guard let url = Bundle.module.url(forResource: name, withExtension: ext) else { return nil }
+        guard let url = resourceBundle.url(forResource: name, withExtension: ext) else { return nil }
         return try? String(contentsOf: url, encoding: .utf8)
     }
 }

@@ -89,7 +89,7 @@ class DocumentWindow: ObservableObject, Identifiable {
 
     static func welcomeHTML(config: AppConfig) -> String {
         let logoData: String
-        if let url = Bundle.module.url(forResource: "welcome_logo", withExtension: "png"),
+        if let url = resourceBundle.url(forResource: "welcome_logo", withExtension: "png"),
            let data = try? Data(contentsOf: url) {
             logoData = data.base64EncodedString()
         } else {

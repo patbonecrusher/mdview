@@ -4,6 +4,7 @@ import SwiftUI
 class AppDelegate: NSObject, NSApplicationDelegate {
     let config = AppConfig.shared
     var windows: [NSWindow: DocumentWindow] = [:]
+    private var openedViaOpenURLs = false
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         // Parse CLI arguments
@@ -46,11 +47,25 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         setupMenuBar()
-        createWindow(file: file)
+
+        if let file = file {
+            // CLI argument: open immediately
+            createWindow(file: file)
+        } else {
+            // Defer welcome window — application(_:open:) may fire first
+            // when launched via Finder double-click
+            DispatchQueue.main.async { [weak self] in
+                guard let self = self else { return }
+                if !self.openedViaOpenURLs && self.windows.isEmpty {
+                    self.createWindow(file: nil)
+                }
+            }
+        }
     }
 
     // Called when files are opened via Finder double-click or "Open With"
     func application(_ application: NSApplication, open urls: [URL]) {
+        openedViaOpenURLs = true
         for url in urls {
             let ext = url.pathExtension.lowercased()
             if ext == "md" || ext == "markdown" {

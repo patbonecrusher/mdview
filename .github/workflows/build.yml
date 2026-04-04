@@ -184,3 +184,11 @@ jobs:
             MdViewer-windows-x64/MdViewer-windows-x64.zip \
             MdViewer-windows-arm64/MdViewer-windows-arm64.zip \
             MdViewer-linux-x64/MdViewer-linux-x64.tar.gz
+      - name: Update Homebrew tap
+        env:
+          GH_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+        run: |
+          VERSION="${GITHUB_REF#refs/tags/v}"
+          gh api repos/patbonecrusher/homebrew-tap/dispatches \
+            -f event_type=update-cask \
+            -f "client_payload[version]=$VERSION"
